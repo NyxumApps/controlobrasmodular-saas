@@ -3,6 +3,7 @@ import { Download, Eye, FileText, Image, Loader2, Paperclip, Trash2, Upload } fr
 import { Button } from "@/components/ui/button";
 import { useStore, type Attachment } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch, toApiError } from "@/lib/api";
 
 const MAX_SIZE = 10 * 1024 * 1024;
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
@@ -34,6 +35,28 @@ export function FileAttachments({ incidentId, contractId, compact = false }: { i
     }
   };
 
+  // The API needs the session token, so files are fetched and handed to the
+  // browser as a temporary local URL instead of linking to the API directly.
+  const open = async (file: Attachment, download: boolean) => {
+    const preview = download ? null : window.open("", "_blank");
+    try {
+      const response = await apiFetch(`/api/attachments/${file.id}/content`, { signal: AbortSignal.timeout(120_000) });
+      const url = URL.createObjectURL(await response.blob());
+      if (preview) preview.location.href = url;
+      else {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = file.fileName;
+        link.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      preview?.close();
+      const failure = toApiError(error);
+      toast({ title: "No se pudo abrir el archivo", description: failure.message });
+    }
+  };
+
   const remove = async (file: Attachment) => {
     try {
       await actions.deleteAttachment(file.id);
@@ -56,8 +79,8 @@ export function FileAttachments({ incidentId, contractId, compact = false }: { i
             <div key={file.id} className="flex min-w-0 items-center gap-2 rounded-md border bg-background p-2 text-xs">
               {file.contentType.startsWith("image/") ? <Image className="h-4 w-4 shrink-0" /> : <FileText className="h-4 w-4 shrink-0" />}
               <span className="min-w-0 flex-1 truncate" title={file.fileName}>{file.fileName}</span>
-              <Button asChild variant="ghost" size="icon" className="h-7 w-7"><a href={`/api/attachments/${file.id}/content`} target="_blank" rel="noreferrer" title="Vista previa"><Eye className="h-3.5 w-3.5" /></a></Button>
-              <Button asChild variant="ghost" size="icon" className="h-7 w-7"><a href={`/api/attachments/${file.id}/content`} download={file.fileName} title="Descargar"><Download className="h-3.5 w-3.5" /></a></Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => void open(file, false)} title="Vista previa"><Eye className="h-3.5 w-3.5" /></Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => void open(file, true)} title="Descargar"><Download className="h-3.5 w-3.5" /></Button>
               <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => void remove(file)} title="Eliminar"><Trash2 className="h-3.5 w-3.5" /></Button>
             </div>
           ))}

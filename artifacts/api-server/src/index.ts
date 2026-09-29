@@ -1,15 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { clerkClient } from "@clerk/express";
-import { processClerkInvitationRevocations } from "./lib/clerk-invitation-revocations";
 
-const rawPort = process.env["PORT"];
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
+const rawPort = process.env["PORT"] ?? "8080";
 
 const port = Number(rawPort);
 
@@ -26,23 +18,11 @@ const server = app.listen(port, (err) => {
   logger.info({ port }, "Server listening");
 });
 
-let retryRunning = false;
-const retryTimer = setInterval(async () => {
-  if (retryRunning) return;
-  retryRunning = true;
-  try {
-    const result = await processClerkInvitationRevocations({
-      revokeClerkInvitation: id => clerkClient.invitations.revokeInvitation(id),
-    });
-    if (result.processed > 0) {
-      logger.info(result, "Processed Clerk invitation revocation retries");
-    }
-  } catch (err) {
-    logger.error({ err }, "Clerk invitation revocation worker failed");
-  } finally {
-    retryRunning = false;
-  }
-}, 30_000);
-retryTimer.unref();
-
-server.on("close", () => clearInterval(retryTimer));
+// Let in-flight requests finish before the platform stops the process.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    logger.info({ signal }, "Shutting down");
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 10_000).unref();
+  });
+}

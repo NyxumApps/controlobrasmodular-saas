@@ -15,7 +15,7 @@ const actionLabels: Record<string, string> = {
   "cost_alert.addressed": "Marcó una alerta de costo como atendida",
   "invitation.revoked": "Canceló una invitación",
   "invitation.resent": "Reenvió una invitación",
-  "invitation.revocation_retry_failed": "No pudo confirmar una cancelación con Clerk",
+  "invitation.revocation_retry_failed": "No pudo confirmar una cancelación de invitación",
 }
 
 const roleLabels: Record<string, string> = {

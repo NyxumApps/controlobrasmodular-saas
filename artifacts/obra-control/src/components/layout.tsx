@@ -3,7 +3,7 @@ import { LayoutDashboard, HardHat, AlertTriangle, Users, Settings, Puzzle, Menu,
 import { useStore } from "@/lib/store"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { UserButton } from "@clerk/react"
+import { UserButton } from "@/components/user-button"
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { state } = useStore()

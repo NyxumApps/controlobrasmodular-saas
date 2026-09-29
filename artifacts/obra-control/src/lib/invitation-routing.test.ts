@@ -9,23 +9,23 @@ import {
 
 test('new users return from sign-up to the original invitation', () => {
   assert.equal(
-    invitationReturnUrl('https://obra.example', '', 'token-123', '?__clerk_ticket=ticket'),
-    'https://obra.example/invite/token-123?__clerk_ticket=ticket',
+    invitationReturnUrl('https://obra.example', '', 'token-123', '?source=email'),
+    'https://obra.example/invite/token-123?source=email',
   );
   assert.equal(
-    invitationSignInPath('', 'token-123', '?__clerk_ticket=ticket'),
-    '/invite/token-123/sign-in?__clerk_ticket=ticket',
+    invitationSignInPath('', 'token-123', '?source=email'),
+    '/invite/token-123/sign-in?source=email',
   );
 });
 
 test('existing users return from sign-in to the original invitation', () => {
   assert.equal(
-    invitationReturnUrl('https://obra.example', '/obra', 'token-123', '?__clerk_ticket=ticket'),
-    'https://obra.example/obra/invite/token-123?__clerk_ticket=ticket',
+    invitationReturnUrl('https://obra.example', '/obra', 'token-123', '?source=email'),
+    'https://obra.example/obra/invite/token-123?source=email',
   );
   assert.equal(
-    invitationPath('/obra', 'token-123', '?__clerk_ticket=ticket'),
-    '/obra/invite/token-123?__clerk_ticket=ticket',
+    invitationPath('/obra', 'token-123', '?source=email'),
+    '/obra/invite/token-123?source=email',
   );
 });
 

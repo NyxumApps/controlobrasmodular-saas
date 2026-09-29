@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter } from "express";
-import { getAuth } from "@clerk/express";
+import { getSessionUserId } from "../middlewares/auth";
 import { eq, sql } from "drizzle-orm";
 import { db, companiesTable, membershipsTable } from "@workspace/db";
 import { OnboardCompanyBody } from "@workspace/api-zod";
@@ -9,7 +9,7 @@ import { ensurePilotData } from "../lib/pilot-seed";
 const router: IRouter = Router();
 
 router.post("/onboarding/company", async (req, res): Promise<void> => {
-  const userId = getAuth(req).userId;
+  const userId = getSessionUserId(req);
   if (!userId) { res.status(401).json({ error: "Unauthorized" }); return; }
   const parsed = OnboardCompanyBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Ingresa el nombre de tu empresa" }); return; }

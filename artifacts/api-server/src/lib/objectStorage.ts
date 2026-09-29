@@ -1,62 +1,70 @@
-import { Storage, type File } from "@google-cloud/storage";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { Transform, type Readable } from "node:stream";
+import { Writable } from "node:stream";
+import { storageBucket, supabaseAdmin } from "./supabase";
 
-const SIDECAR = "http://127.0.0.1:1106";
-const storage = new Storage({
-  credentials: {
-    audience: "replit", subject_token_type: "access_token",
-    token_url: `${SIDECAR}/token`, type: "external_account",
-    credential_source: { url: `${SIDECAR}/credential`, format: { type: "json", subject_token_field_name: "access_token" } },
-    universe_domain: "googleapis.com",
-  },
-  projectId: "",
-});
+/**
+ * Minimal handle over one object in the private Supabase Storage bucket.
+ * Results come as one-element tuples because the attachment routes (and their
+ * tests) were written against that shape.
+ */
+export type StoredObject = {
+  name: string;
+  exists(): Promise<[boolean]>;
+  getMetadata(): Promise<[{ size?: string | number; contentType?: string }]>;
+  delete(options?: { ignoreNotFound?: boolean }): Promise<unknown>;
+};
 
-function privateDir() {
-  const value = process.env.PRIVATE_OBJECT_DIR;
-  if (!value) throw new Error("PRIVATE_OBJECT_DIR is not configured");
-  return value;
-}
+const bucket = () => supabaseAdmin().storage.from(storageBucket());
 
-function parse(path: string) {
-  const parts = path.replace(/^\/+/, "").split("/");
-  if (parts.length < 2) throw new Error("Invalid object path");
-  return { bucket: parts[0], name: parts.slice(1).join("/") };
-}
-
-export function objectFile(objectPath: string): File {
+export function objectFile(objectPath: string): StoredObject {
   if (!objectPath.startsWith("/objects/uploads/")) throw new Error("Invalid object path");
-  const { bucket, name } = parse(`${privateDir().replace(/\/$/, "")}/${objectPath.slice("/objects/".length)}`);
-  return storage.bucket(bucket).file(name);
+  const name = objectPath.slice("/objects/".length);
+  if (name.includes("..")) throw new Error("Invalid object path");
+  return {
+    name,
+    async exists() {
+      const { data, error } = await bucket().exists(name);
+      return [!error && data === true];
+    },
+    async getMetadata() {
+      const { data, error } = await bucket().info(name);
+      if (error) throw error;
+      return [{ size: data.size, contentType: data.contentType }];
+    },
+    async delete(options) {
+      const { error } = await bucket().remove([name]);
+      if (error && !options?.ignoreNotFound) throw error;
+      return undefined;
+    },
+  };
 }
 
-export async function uploadObject(file: File, source: Readable, contentType: string, expectedSize: number) {
+export async function uploadObject(file: StoredObject, source: Readable, contentType: string, expectedSize: number) {
   let received = 0;
+  const chunks: Buffer[] = [];
   const limiter = new Transform({
     transform(chunk, _encoding, callback) {
       received += chunk.length;
       callback(received > expectedSize ? new Error("Upload exceeds declared size") : undefined, chunk);
     },
   });
-  try {
-    await pipeline(source, limiter, file.createWriteStream({
-      resumable: false,
-      validation: "crc32c",
-      metadata: { contentType },
-    }));
-    if (received !== expectedSize) throw new Error("Upload size does not match declaration");
-  } catch (error) {
-    await file.delete({ ignoreNotFound: true }).catch(() => undefined);
-    throw error;
-  }
+  // Files are capped at 10 MiB by the route, so buffering keeps the upload atomic.
+  const collector = new Writable({
+    write(chunk, _encoding, callback) { chunks.push(chunk); callback(); },
+  });
+  await pipeline(source, limiter, collector);
+  if (received !== expectedSize) throw new Error("Upload size does not match declaration");
+  const { error } = await bucket().upload(file.name, Buffer.concat(chunks), { contentType, upsert: false });
+  if (error) throw error;
 }
 
-export async function streamObject(file: File) {
-  const [metadata] = await file.getMetadata();
+export async function streamObject(file: StoredObject) {
+  const { data, error } = await bucket().download(file.name);
+  if (error) throw error;
   return {
-    stream: file.createReadStream(),
-    contentType: String(metadata.contentType || "application/octet-stream"),
-    size: metadata.size ? String(metadata.size) : undefined,
+    stream: Readable.from(Buffer.from(await data.arrayBuffer())),
+    contentType: data.type || "application/octet-stream",
+    size: String(data.size),
   };
 }

@@ -1,6 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type RequestHandler } from "express";
-import { clerkClient, getAuth } from "@clerk/express";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { auditEventsTable, db, companyInvitationsTable, membershipsTable } from "@workspace/db";
 import {
@@ -11,37 +10,47 @@ import {
 } from "@workspace/api-zod";
 import { emailMatchesInvitation, hashInvitationToken, invitationOrigin, normalizeEmail } from "../lib/invitation-security";
 import { ensurePilotData } from "../lib/pilot-seed";
-import { requireAuth } from "../middlewares/auth";
+import { getSessionUserId, requireAuth } from "../middlewares/auth";
 import { can } from "../lib/authorization-policy";
-import { getClerkProxyHost } from "../middlewares/clerkProxyMiddleware";
+import { getRequestHostWithPort } from "../middlewares/allowedHost";
+import { supabaseAdmin } from "../lib/supabase";
 
 type InvitationRouterDependencies = {
   getUserId: (req: Request) => string | null;
   getVerifiedEmails: (userId: string) => Promise<string[]>;
   seedCompany: (companyId: string) => Promise<void>;
   authenticate: RequestHandler;
-  createClerkInvitation: (input: {
-    emailAddress: string;
-    expiresInDays: number;
-    ignoreExisting: boolean;
-    notify: boolean;
-    redirectUrl: string;
-  }) => Promise<{ id: string }>;
-  revokeClerkInvitation: (id: string) => Promise<unknown>;
+  sendInvitationEmail: (input: { emailAddress: string; redirectUrl: string }) => Promise<void>;
 };
 
+/**
+ * New people receive Supabase's invitation email; people who already have an
+ * account receive a sign-in link. Both land on /invite/{token}, and that token
+ * (stored only as a hash) is what actually grants the membership.
+ */
+async function sendSupabaseInvitation(input: { emailAddress: string; redirectUrl: string }): Promise<void> {
+  const auth = supabaseAdmin().auth;
+  const invited = await auth.admin.inviteUserByEmail(input.emailAddress, { redirectTo: input.redirectUrl });
+  if (!invited.error) return;
+  if (invited.error.code !== "email_exists" && invited.error.status !== 422) throw invited.error;
+  const link = await auth.signInWithOtp({
+    email: input.emailAddress,
+    options: { shouldCreateUser: false, emailRedirectTo: input.redirectUrl },
+  });
+  if (link.error) throw link.error;
+}
+
 const defaultDependencies: InvitationRouterDependencies = {
-  getUserId: req => getAuth(req).userId,
+  getUserId: getSessionUserId,
   getVerifiedEmails: async userId => {
-    const user = await clerkClient.users.getUser(userId);
-    return user.emailAddresses
-      .filter(address => address.verification?.status === "verified")
-      .map(address => address.emailAddress);
+    const { data, error } = await supabaseAdmin().auth.admin.getUserById(userId);
+    if (error) throw error;
+    const user = data.user;
+    return user?.email && user.email_confirmed_at ? [user.email] : [];
   },
   seedCompany: ensurePilotData,
   authenticate: requireAuth,
-  createClerkInvitation: input => clerkClient.invitations.createInvitation(input),
-  revokeClerkInvitation: id => clerkClient.invitations.revokeInvitation(id),
+  sendInvitationEmail: sendSupabaseInvitation,
 };
 
 export function createInvitationsRouter(
@@ -88,7 +97,7 @@ router.post("/invitations", dependencies.authenticate, async (req, res): Promise
   const now = new Date();
   const expiresAt = new Date(now.getTime() + invitationLifetimeMs);
   const invitationId = `invitation-${randomUUID()}`;
-  const host = getClerkProxyHost(req);
+  const host = getRequestHostWithPort(req);
   if (!host) { res.status(400).json({ error: "No se pudo validar el destino de la invitación" }); return; }
   const redirectUrl = `${invitationOrigin(host)}/invite/${token}`;
   const reservation = await db.transaction(async tx => {
@@ -113,18 +122,8 @@ router.post("/invitations", dependencies.authenticate, async (req, res): Promise
   });
   if ("error" in reservation) { res.status(409).json({ error: "Ya existe una invitación vigente para este correo" }); return; }
   try {
-    const clerkInvitation = await dependencies.createClerkInvitation({
-      emailAddress: email,
-      expiresInDays: 7,
-      ignoreExisting: true,
-      notify: true,
-      redirectUrl,
-    });
-    const [row] = await db.update(companyInvitationsTable)
-      .set({ clerkInvitationId: clerkInvitation.id })
-      .where(eq(companyInvitationsTable.id, invitationId))
-      .returning();
-    res.status(201).json(serializeInvitation(row));
+    await dependencies.sendInvitationEmail({ emailAddress: email, redirectUrl });
+    res.status(201).json(serializeInvitation(reservation.row));
   } catch (error) {
     await db.delete(companyInvitationsTable).where(and(
       eq(companyInvitationsTable.id, invitationId),
@@ -169,22 +168,7 @@ router.delete("/invitations/:id", dependencies.authenticate, async (req, res): P
     });
     return;
   }
-  try {
-    if (result.revoked.clerkInvitationId) {
-      await dependencies.revokeClerkInvitation(result.revoked.clerkInvitationId);
-    }
-    res.json(serializeInvitation(result.revoked));
-  } catch (error) {
-    const retryAt = new Date(Date.now() + 60_000);
-    await db.update(companyInvitationsTable).set({
-      clerkRevocationPending: true,
-      clerkRevocationAttempts: 1,
-      clerkRevocationNextAttemptAt: retryAt,
-      clerkRevocationLastError: "Initial Clerk revocation failed",
-    }).where(eq(companyInvitationsTable.id, result.revoked.id));
-    req.log.error({ err: error, invitationId: result.revoked.id }, "Failed to revoke Clerk teammate invitation");
-    res.status(502).json({ error: "La invitación quedó cancelada en ObraControl, pero Clerk no confirmó la cancelación" });
-  }
+  res.json(serializeInvitation(result.revoked));
 });
 
 router.post("/invitations/:id/resend", dependencies.authenticate, async (req, res): Promise<void> => {
@@ -194,7 +178,7 @@ router.post("/invitations/:id/resend", dependencies.authenticate, async (req, re
   }
   const parsed = ResendInvitationParams.safeParse(req.params);
   if (!parsed.success) { res.status(400).json({ error: "La invitación no es válida" }); return; }
-  const host = getClerkProxyHost(req);
+  const host = getRequestHostWithPort(req);
   if (!host) { res.status(400).json({ error: "No se pudo validar el destino de la invitación" }); return; }
   const token = randomBytes(32).toString("base64url");
   const now = new Date();
@@ -244,45 +228,30 @@ router.post("/invitations/:id/resend", dependencies.authenticate, async (req, re
     });
     return;
   }
-  let newClerkInvitationId: string | undefined;
   try {
-    const clerkInvitation = await dependencies.createClerkInvitation({
+    await dependencies.sendInvitationEmail({
       emailAddress: reservation.row.email,
-      expiresInDays: 7,
-      ignoreExisting: true,
-      notify: true,
       redirectUrl: `${invitationOrigin(host)}/invite/${token}`,
     });
-    newClerkInvitationId = clerkInvitation.id;
     const [row] = await db.transaction(async tx => {
-      const [updated] = await tx.update(companyInvitationsTable)
-        .set({ clerkInvitationId: clerkInvitation.id })
-        .where(and(
-          eq(companyInvitationsTable.id, newInvitationId),
-          eq(companyInvitationsTable.status, "pending"),
-        ))
-        .returning();
-      if (!updated) return [];
+      const [current] = await tx.select().from(companyInvitationsTable).where(and(
+        eq(companyInvitationsTable.id, newInvitationId),
+        eq(companyInvitationsTable.status, "pending"),
+      )).limit(1);
+      if (!current) return [];
       await tx.insert(auditEventsTable).values(invitationAuditEvent(
-        updated.companyId,
+        current.companyId,
         req.userId!,
         "invitation.resent",
         parsed.data.id,
-        updated.email,
-        { replacementInvitationId: updated.id },
+        current.email,
+        { replacementInvitationId: current.id },
       ));
-      return [updated];
+      return [current];
     });
-    if (!row) throw new Error("Invitation reservation disappeared before Clerk synchronization");
+    if (!row) throw new Error("Invitation reservation disappeared before it could be confirmed");
     res.status(201).json(serializeInvitation(row));
   } catch (error) {
-    if (newClerkInvitationId) {
-      try {
-        await dependencies.revokeClerkInvitation(newClerkInvitationId);
-      } catch (cleanupError) {
-        req.log.error({ err: cleanupError, clerkInvitationId: newClerkInvitationId }, "Failed to clean up resent Clerk invitation");
-      }
-    }
     await db.delete(companyInvitationsTable).where(and(
       eq(companyInvitationsTable.id, newInvitationId),
       eq(companyInvitationsTable.status, "pending"),

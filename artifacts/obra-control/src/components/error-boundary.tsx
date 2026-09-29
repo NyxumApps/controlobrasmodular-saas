@@ -13,6 +13,10 @@ export class ErrorBoundary extends React.Component<
     return { hasError: true, error };
   }
 
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error(error, info.componentStack);
+  }
+
   componentDidUpdate(prevProps: { resetKey?: any }) {
     if (prevProps.resetKey !== this.props.resetKey) {
       this.setState({ hasError: false, error: null });
@@ -22,9 +26,16 @@ export class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="p-8 text-center text-destructive">
-          <h2 className="text-xl font-bold mb-2">Algo salió mal</h2>
-          <p className="text-sm font-mono">{this.state.error?.message}</p>
+        <div className="grid min-h-[60vh] place-items-center p-8 text-center">
+          <div className="max-w-md">
+            <h2 className="text-xl font-bold mb-2">Algo salió mal en esta pantalla</h2>
+            <p className="text-sm text-muted-foreground">Tu información está segura. Puedes intentar de nuevo o volver al inicio.</p>
+            <div className="mt-5 flex justify-center gap-2">
+              <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" onClick={() => this.setState({ hasError: false, error: null })}>Intentar de nuevo</button>
+              <button className="rounded-md border px-4 py-2 text-sm font-medium" onClick={() => window.location.assign(import.meta.env.BASE_URL)}>Ir al inicio</button>
+            </div>
+            {import.meta.env.DEV && <p className="mt-4 text-xs font-mono text-destructive">{this.state.error?.message}</p>}
+          </div>
         </div>
       );
     }

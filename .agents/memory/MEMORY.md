@@ -1,3 +1,0 @@
-- [Clerk invitation redirects](clerk-invitation-redirects.md) — invitation links must preserve their return URL through both sign-up and sign-in paths.
-- [Secure upload reservations](secure-upload-reservations.md) — file uploads must use owned, expiring, quota-limited reservations that are claimed once.
-- [GitHub push transport](github-push-transport.md) — GitHub API authorization does not necessarily authenticate Git CLI; confirm the remote ref rather than trusting local tracking.

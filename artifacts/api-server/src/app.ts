@@ -1,18 +1,15 @@
 import express, { type Express } from "express";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
-import { clerkMiddleware } from "@clerk/express";
-import { publishableKeyFromHost } from "@clerk/shared/keys";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import {
-  CLERK_PROXY_PATH,
-  clerkProxyMiddleware,
-  getClerkProxyHost,
-  requireAllowedHost,
-} from "./middlewares/clerkProxyMiddleware";
+import { requireAllowedHost } from "./middlewares/allowedHost";
+import { authenticateSession } from "./middlewares/auth";
+import { errorHandler, notFoundHandler } from "./middlewares/errors";
 
 const app: Express = express();
+// Behind a reverse proxy in production; needed for rate limits and secure cookies.
+app.set("trust proxy", 1);
 
 app.use(
   pinoHttp({
@@ -34,19 +31,13 @@ app.use(
   }),
 );
 app.use(requireAllowedHost);
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 app.use(cookieParser(process.env.SESSION_SECRET));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
+app.use(authenticateSession);
 
 app.use("/api", router);
+app.use("/api", notFoundHandler);
+app.use(errorHandler);
 
 export default app;

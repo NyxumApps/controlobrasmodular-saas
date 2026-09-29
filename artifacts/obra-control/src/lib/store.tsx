@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiFetch, apiJson, toApiError } from '@/lib/api';
+import { toast } from '@/hooks/use-toast';
 
 export type WorkStatus = 'planificación' | 'en curso' | 'pausada' | 'completada';
 export type IncidentStatus = 'abierto' | 'en proceso' | 'resuelto';
@@ -138,49 +140,64 @@ const StoreContext = createContext<StoreContextType | null>(null);
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ['bootstrap'], queryFn: async () => {
-    const response = await fetch('/api/bootstrap');
-    if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'No se pudo cargar la información compartida');
-    return response.json();
-  }, staleTime: 10_000 });
+    return apiJson<any>('/api/bootstrap');
+  }, staleTime: 10_000, retry: (failures, error) => ['offline', 'timeout', 'server'].includes(toApiError(error).kind) && failures < 2 });
   const refresh = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['bootstrap'] }),
       queryClient.invalidateQueries({ queryKey: ['/audit-events'] }),
     ]);
   };
-  const request = async <T = unknown>(path: string, method: string, data?: unknown): Promise<T> => {
-    const response = await fetch(`/api${path}`, { method, headers: data ? { 'Content-Type': 'application/json' } : undefined, body: data ? JSON.stringify(data) : undefined });
-    if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'No se pudo guardar el cambio');
-    const result = response.status === 204 ? undefined : await response.json();
-    await refresh();
-    return result as T;
+  // Every change goes through here, so a failure is always explained to the
+  // person even when the screen that started it has no error state of its own.
+  const notifyFailure = (cause: unknown) => {
+    const error = toApiError(cause);
+    if (!error.notified) {
+      error.notified = true;
+      toast({ title: error.title, description: error.requestId ? `${error.message} (Referencia: ${error.requestId})` : error.message });
+    }
+    return error;
   };
-  if (query.isError) return <AccessPending error={query.error.message} onCreated={() => query.refetch()} />;
+  const request = async <T = unknown>(path: string, method: string, data?: unknown, done?: string): Promise<T> => {
+    try {
+      const result = await apiJson<T>(`/api${path}`, method, data);
+      await refresh();
+      if (done) toast({ title: done });
+      return result;
+    } catch (cause) {
+      throw notifyFailure(cause);
+    }
+  };
+  if (query.isError) {
+    const failure = toApiError(query.error);
+    if (failure.kind === 'permission') return <AccessPending error={failure.message} onCreated={() => query.refetch()} />;
+    return <LoadFailed title={failure.title} message={failure.message} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
+  }
   if (query.isLoading || !query.data) return <div className="min-h-screen grid place-items-center text-muted-foreground">Cargando información compartida…</div>;
   const data = query.data;
   const roleLabels = { owner_manager: 'Dueño' as const, office: 'Oficina' as const, site_manager: 'Jefe de obra' as const };
   const state: StoreState = { members: data.members, invitations: data.invitations, works: data.works, budgetItems: data.budgetItems, expenses: data.expenses, incidents: data.incidents, subcontractors: data.subcontractors, contracts: data.contracts, attachments: data.attachments, addressedCostAlerts: data.addressedCostAlerts, settings: { modules: data.settings, role: roleLabels[data.role as keyof typeof roleLabels], companyName: data.company.name }, metrics: data.metrics };
   const actions: StoreContextType['actions'] = {
-    createWork: data => request('/works', 'POST', data),
-    createExpense: data => request('/expenses', 'POST', data),
-    createIncident: data => request<Incident>('/incidents', 'POST', data),
-    changeIncidentStatus: (id, status) => request(`/incidents/${id}/status`, 'PATCH', { status }),
-    approvePayment: (id, amount) => request(`/contracts/${id}/payment`, 'PATCH', { amount }),
+    createWork: data => request('/works', 'POST', data, 'Obra creada'),
+    createExpense: data => request('/expenses', 'POST', data, 'Gasto registrado'),
+    createIncident: data => request<Incident>('/incidents', 'POST', data, 'Incidencia reportada'),
+    changeIncidentStatus: (id, status) => request(`/incidents/${id}/status`, 'PATCH', { status }, 'Estado actualizado'),
+    approvePayment: (id, amount) => request(`/contracts/${id}/payment`, 'PATCH', { amount }, 'Pago aprobado'),
     uploadAttachment: async (file, target) => {
       const reservation = await request<{ uploadURL: string; objectPath: string }>('/storage/uploads/request-url', 'POST', { name: file.name, size: file.size, contentType: file.type });
-      const upload = await fetch(reservation.uploadURL, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-      if (!upload.ok) throw new Error((await upload.json().catch(() => null))?.error ?? 'No se pudo transferir el archivo');
+      await apiFetch(reservation.uploadURL, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file, signal: AbortSignal.timeout(120_000) }).catch(cause => { throw notifyFailure(cause); });
       await request('/attachments', 'POST', { objectPath: reservation.objectPath, fileName: file.name, contentType: file.type, size: file.size, ...target });
     },
     deleteAttachment: id => request(`/attachments/${id}`, 'DELETE'),
-    updateCompanyName: name => request('/company', 'PATCH', { name }),
-    updateMemberRole: (id, role) => request(`/members/${id}/role`, 'PATCH', { role }),
-    inviteMember: (email, role) => request('/invitations', 'POST', { email, role }),
+    updateCompanyName: name => request('/company', 'PATCH', { name }, 'Cambios guardados'),
+    updateMemberRole: (id, role) => request(`/members/${id}/role`, 'PATCH', { role }, 'Rol actualizado'),
+    inviteMember: (email, role) => request('/invitations', 'POST', { email, role }, 'Invitación enviada'),
     revokeInvitation: id => request(`/invitations/${id}`, 'DELETE'),
     resendInvitation: id => request(`/invitations/${id}/resend`, 'POST'),
-    toggleModule: (module, enabled) => request('/settings/modules', 'PATCH', { module, enabled }),
-    markCostAlert: id => request(`/cost-alerts/${encodeURIComponent(id)}/address`, 'POST'),
-    reviewWork: id => request(`/works/${id}/review`, 'POST'),
+    toggleModule: (module, enabled) => request('/settings/modules', 'PATCH', { module, enabled }, enabled ? 'Módulo activado' : 'Módulo desactivado'),
+    markCostAlert: id => request(`/cost-alerts/${encodeURIComponent(id)}/address`, 'POST', undefined, 'Alerta marcada como atendida'),
+    // Background bookkeeping: a failure here must not interrupt reading the work.
+    reviewWork: id => apiJson(`/api/works/${id}/review`, 'POST').then(refresh, () => undefined),
   };
 
   return (
@@ -198,20 +215,19 @@ function AccessPending({ error, onCreated }: { error: string; onCreated: () => P
     setSaving(true);
     setCreationError("");
     try {
-      const response = await fetch('/api/onboarding/company', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: companyName }),
-      });
-      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'No se pudo crear la empresa');
+      await apiJson('/api/onboarding/company', 'POST', { name: companyName });
       await onCreated();
     } catch (cause) {
-      setCreationError(cause instanceof Error ? cause.message : 'No se pudo crear la empresa');
+      setCreationError(toApiError(cause).message);
     } finally {
       setSaving(false);
     }
   };
   return <div className="min-h-screen grid place-items-center p-6"><div className="max-w-lg rounded-xl border bg-card p-6 text-center"><h1 className="text-xl font-semibold">Configura tu acceso</h1><p className="mt-2 text-muted-foreground">{error}</p><p className="mt-5 text-sm text-muted-foreground">Si te invitaron, abre el enlace enviado a tu correo. Si eres el primer dueño, crea una empresa nueva.</p><div className="mt-5 flex gap-2"><input className="h-10 flex-1 rounded-md border bg-background px-3 text-sm" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Nombre de la empresa" aria-label="Nombre de la empresa" /><button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50" disabled={!companyName.trim() || saving} onClick={() => void createCompany()}>{saving ? 'Creando…' : 'Crear empresa'}</button></div>{creationError && <p className="mt-3 text-sm text-destructive">{creationError}</p>}</div></div>;
+}
+
+function LoadFailed({ title, message, onRetry, retrying }: { title: string; message: string; onRetry: () => void; retrying: boolean }) {
+  return <div className="min-h-screen grid place-items-center p-6"><div className="max-w-lg rounded-xl border bg-card p-6 text-center"><h1 className="text-xl font-semibold">{title}</h1><p className="mt-2 text-muted-foreground">{message}</p><button className="mt-5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50" disabled={retrying} onClick={onRetry}>{retrying ? 'Reintentando…' : 'Intentar de nuevo'}</button></div></div>;
 }
 
 export function useStore() {

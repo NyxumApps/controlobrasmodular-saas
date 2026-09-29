@@ -10,7 +10,6 @@ import {
   membershipsTable,
 } from "@workspace/db";
 import { hashInvitationToken } from "./invitation-security";
-import { processClerkInvitationRevocations } from "./clerk-invitation-revocations";
 import { createInvitationsRouter } from "../routes/invitations";
 
 test("invitation acceptance covers signed-in, wrong-account, expiry, and replay safely", async () => {
@@ -58,8 +57,7 @@ test("invitation acceptance covers signed-in, wrong-account, expiry, and replay 
     getVerifiedEmails: async userId => userEmails.get(userId) ?? [],
     seedCompany: async () => {},
     authenticate: (_req, _res, next) => next(),
-    createClerkInvitation: async () => ({ id: "unused" }),
-    revokeClerkInvitation: async () => {},
+    sendInvitationEmail: async () => {},
   }));
   const server = app.listen(0);
   await new Promise<void>((resolve, reject) => {
@@ -128,9 +126,7 @@ test("invitation cancellation and resend enforce roles, isolation, terminal toke
   const foreignId = `foreign-${suffix}`;
   const invitationIds = [revokeId, successfulRevokeId, expiredId, syncFailureId, foreignId];
   const createdRedirects: string[] = [];
-  const clerkRevocations: string[] = [];
   let failCreation = false;
-  let failRevocation = false;
   let deleteReplacementBeforeSync = false;
 
   await db.insert(companiesTable).values([
@@ -189,19 +185,13 @@ test("invitation cancellation and resend enforce roles, isolation, terminal toke
     ],
     seedCompany: async () => {},
     authenticate: (_req, _res, next) => next(),
-    createClerkInvitation: async input => {
-      if (failCreation) throw new Error("Clerk create failed");
+    sendInvitationEmail: async input => {
+      if (failCreation) throw new Error("Invitation email failed");
       createdRedirects.push(input.redirectUrl);
-      const clerkId = `clerk-new-${createdRedirects.length}-${suffix}`;
       if (deleteReplacementBeforeSync) {
         const token = input.redirectUrl.split("/").at(-1)!;
         await db.delete(companyInvitationsTable).where(eq(companyInvitationsTable.tokenHash, hashInvitationToken(token)));
       }
-      return { id: clerkId };
-    },
-    revokeClerkInvitation: async id => {
-      clerkRevocations.push(id);
-      if (failRevocation) throw new Error("Clerk revoke failed");
     },
   }));
   const server = app.listen(0);
@@ -227,33 +217,12 @@ test("invitation cancellation and resend enforce roles, isolation, terminal toke
     assert.equal((await request(users.owner, "POST", `/invitations/${foreignId}/resend`)).status, 404);
 
     assert.equal((await request(users.owner, "DELETE", `/invitations/${successfulRevokeId}`)).status, 200);
-    assert.ok(clerkRevocations.includes(`clerk-${successfulRevokeId}`));
 
-    failRevocation = true;
-    assert.equal((await request(users.owner, "DELETE", `/invitations/${revokeId}`)).status, 502);
+    assert.equal((await request(users.owner, "DELETE", `/invitations/${revokeId}`)).status, 200);
     const [locallyRevoked] = await db.select().from(companyInvitationsTable).where(eq(companyInvitationsTable.id, revokeId));
-    assert.equal(locallyRevoked.status, "revoked", "local cancellation remains terminal when Clerk revocation fails");
-    assert.equal(locallyRevoked.clerkRevocationPending, true, "failed Clerk cancellation is persisted for retry");
-    assert.ok(locallyRevoked.clerkRevocationNextAttemptAt);
-    assert.equal(locallyRevoked.clerkRevocationAttempts, 1);
-    assert.equal(locallyRevoked.clerkRevocationLastError, "Initial Clerk revocation failed");
+    assert.equal(locallyRevoked.status, "revoked", "cancellation is terminal");
     assert.equal((await request(users.owner, "POST", "/invitations/accept", { token: revokedToken })).status, 409);
-    failRevocation = false;
-    const retryNow = new Date(locallyRevoked.clerkRevocationNextAttemptAt!.getTime() + 1);
-    const firstRetry = await processClerkInvitationRevocations({
-      revokeClerkInvitation: async id => { clerkRevocations.push(id); },
-      now: () => retryNow,
-    });
-    assert.deepEqual(firstRetry, { processed: 1, succeeded: 1, failed: 0 });
-    const [reconciled] = await db.select().from(companyInvitationsTable).where(eq(companyInvitationsTable.id, revokeId));
-    assert.equal(reconciled.clerkRevocationPending, false, "Clerk confirmation permanently clears the retry");
-    const revocationCount = clerkRevocations.filter(id => id === `clerk-${revokeId}`).length;
-    const secondRetry = await processClerkInvitationRevocations({
-      revokeClerkInvitation: async id => { clerkRevocations.push(id); },
-      now: () => new Date(retryNow.getTime() + 60_000),
-    });
-    assert.deepEqual(secondRetry, { processed: 0, succeeded: 0, failed: 0 });
-    assert.equal(clerkRevocations.filter(id => id === `clerk-${revokeId}`).length, revocationCount);
+    assert.equal((await request(users.owner, "DELETE", `/invitations/${revokeId}`)).status, 409, "a cancelled invitation cannot be cancelled again");
 
     const resendResults = await Promise.all([
       request(users.owner, "POST", `/invitations/${revokeId}/resend`),
@@ -277,7 +246,7 @@ test("invitation cancellation and resend enforce roles, isolation, terminal toke
     assert.equal(oldRecord.status, "revoked");
     assert.notEqual(newRecord.tokenHash, oldRecord.tokenHash, "resend creates a distinct one-time token");
     invitationIds.push(newRecord.id);
-    assert.equal(createdRedirects.length, 1, "only one replacement invitation is sent through Clerk");
+    assert.equal(createdRedirects.length, 1, "only one replacement invitation is sent by email");
     const newToken = createdRedirects.at(-1)!.split("/").at(-1)!;
     assert.equal(hashInvitationToken(newToken), newRecord.tokenHash);
     assert.equal((await request(users.owner, "POST", "/invitations/accept", { token: revokedToken })).status, 409);
@@ -293,11 +262,11 @@ test("invitation cancellation and resend enforce roles, isolation, terminal toke
     assert.equal(
       (await db.select().from(companyInvitationsTable).where(eq(companyInvitationsTable.email, failedCreateEmail))).length,
       0,
-      "failed initial Clerk creation removes the local reservation",
+      "failed initial email removes the local reservation",
     );
     assert.equal((await request(users.owner, "POST", `/invitations/${expiredId}/resend`)).status, 502);
     const expiredRows = await db.select().from(companyInvitationsTable).where(eq(companyInvitationsTable.email, `expired-${suffix}@example.com`));
-    assert.equal(expiredRows.length, 1, "failed Clerk creation removes the replacement reservation");
+    assert.equal(expiredRows.length, 1, "failed email removes the replacement reservation");
     assert.equal(expiredRows[0].status, "revoked", "expired source remains terminal after failed resend");
     assert.equal((await request(users.owner, "POST", "/invitations/accept", { token: expiredToken })).status, 409);
 
@@ -305,10 +274,6 @@ test("invitation cancellation and resend enforce roles, isolation, terminal toke
     deleteReplacementBeforeSync = true;
     const syncFailure = await request(users.owner, "POST", `/invitations/${syncFailureId}/resend`);
     assert.equal(syncFailure.status, 502);
-    assert.ok(
-      clerkRevocations.includes(`clerk-new-${createdRedirects.length}-${suffix}`),
-      "a Clerk invitation is revoked when local synchronization loses its reservation",
-    );
     const [syncSource] = await db.select().from(companyInvitationsTable).where(eq(companyInvitationsTable.id, syncFailureId));
     assert.equal(syncSource.status, "revoked");
   } finally {
