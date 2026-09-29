@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 64" role="img" aria-label="ObraControl">
+  <path fill="#F4602A" d="M4 56 30 8l26 48H45L30 29 15 56H4Z"/>
+  <path fill="#1F2A3A" d="M24 43h12v13H24z"/>
+  <text x="70" y="43" fill="#1F2A3A" font-family="'Plus Jakarta Sans',Arial,sans-serif" font-size="30" font-weight="800" letter-spacing="-0.5">Obra<tspan font-weight="500">Control</tspan></text>
+</svg>
