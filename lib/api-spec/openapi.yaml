@@ -1,0 +1,516 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: analytics
+    description: Privacy-safe pilot analytics
+paths:
+  /onboarding/company:
+    post:
+      operationId: onboardCompany
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompanyOnboardingInput" }
+      responses:
+        "201": { description: Company created, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "400": { description: Invalid company name }
+        "401": { description: Unauthorized }
+        "409": { description: Already a member }
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /analytics/events:
+    post:
+      operationId: recordAnalyticsEvent
+      tags: [analytics]
+      summary: Record a privacy-safe pilot event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyticsEvent"
+      responses:
+        "204":
+          description: Event recorded
+        "400":
+          description: Invalid or disallowed event
+  /analytics/summary:
+    get:
+      operationId: getAnalyticsSummary
+      tags: [analytics]
+      summary: Get aggregate pilot indicators
+      responses:
+        "200":
+          description: Aggregate indicators
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSummary"
+  /bootstrap:
+    get:
+      operationId: getBootstrap
+      tags: [workspace]
+      responses:
+        "200":
+          description: Tenant workspace state
+          content: { application/json: { schema: { $ref: "#/components/schemas/Bootstrap" } } }
+        "401": { description: Unauthorized }
+  /works:
+    post:
+      operationId: createWork
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/WorkInput" } } } }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Work" } } } }, "403": { description: Forbidden } }
+  /expenses:
+    post:
+      operationId: createExpense
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ExpenseInput" } } } }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Expense" } } } }, "403": { description: Forbidden } }
+  /incidents:
+    post:
+      operationId: createIncident
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/IncidentInput" } } } }
+      responses: { "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Incident" } } } }, "403": { description: Forbidden } }
+  /incidents/{id}/status:
+    patch:
+      operationId: changeIncidentStatus
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/IncidentStatusInput" } } } }
+      responses: { "200": { description: Updated, content: { application/json: { schema: { $ref: "#/components/schemas/Incident" } } } }, "403": { description: Forbidden } }
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/UploadUrlRequest" } } } }
+      responses:
+        "200": { description: Upload URL, content: { application/json: { schema: { $ref: "#/components/schemas/UploadUrlResponse" } } } }
+        "400": { description: Invalid file }
+  /attachments:
+    post:
+      operationId: createAttachment
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/AttachmentInput" } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Attachment" } } } }
+        "403": { description: Forbidden }
+  /attachments/{id}:
+    delete:
+      operationId: deleteAttachment
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "204": { description: Deleted }, "403": { description: Forbidden }, "404": { description: Not found } }
+  /attachments/{id}/content:
+    get:
+      operationId: getAttachmentContent
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: File content, content: { "*/*": { schema: { type: string, format: binary } } } }
+        "404": { description: Not found }
+  /contracts/{id}/payment:
+    patch:
+      operationId: approveContractPayment
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ContractPaymentInput" } } } }
+      responses: { "200": { description: Updated, content: { application/json: { schema: { type: object, additionalProperties: true } } } }, "403": { description: Forbidden } }
+  /company:
+    patch:
+      operationId: updateCompanyName
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/CompanyUpdate" } } } }
+      responses: { "200": { description: Updated, content: { application/json: { schema: { $ref: "#/components/schemas/Company" } } } }, "403": { description: Forbidden } }
+  /members/{id}/role:
+    patch:
+      operationId: updateMemberRole
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/MemberRoleInput" } } } }
+      responses: { "200": { description: Updated, content: { application/json: { schema: { type: object, additionalProperties: true } } } }, "403": { description: Forbidden } }
+  /invitations:
+    post:
+      operationId: createInvitation
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/InvitationInput" } } } }
+      responses:
+        "201": { description: Sent, content: { application/json: { schema: { $ref: "#/components/schemas/Invitation" } } } }
+        "403": { description: Forbidden }
+        "409": { description: Already invited or already a member }
+  /invitations/{id}:
+    delete:
+      operationId: revokeInvitation
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Revoked, content: { application/json: { schema: { $ref: "#/components/schemas/Invitation" } } } }
+        "403": { description: Forbidden }
+        "404": { description: Invitation not found }
+        "409": { description: Invitation is no longer pending }
+        "502": { description: Clerk invitation could not be revoked }
+  /invitations/{id}/resend:
+    post:
+      operationId: resendInvitation
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "201": { description: Resent with a fresh token, content: { application/json: { schema: { $ref: "#/components/schemas/Invitation" } } } }
+        "403": { description: Forbidden }
+        "404": { description: Invitation not found }
+        "409": { description: Only expired or revoked invitations can be resent }
+        "502": { description: Clerk invitation could not be resent }
+  /invitations/accept:
+    post:
+      operationId: acceptInvitation
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/InvitationAcceptance" } } } }
+      responses:
+        "200": { description: Accepted, content: { application/json: { schema: { type: object, additionalProperties: true } } } }
+        "401": { description: Unauthorized }
+        "409": { description: "Invalid, expired, used, or wrong account" }
+  /settings/modules:
+    patch:
+      operationId: toggleModule
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ModuleUpdate" } } } }
+      responses: { "200": { description: Updated, content: { application/json: { schema: { type: object, additionalProperties: true } } } }, "403": { description: Forbidden } }
+  /cost-alerts/{id}/address:
+    post:
+      operationId: markCostAlertAddressed
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "204": { description: Addressed }, "403": { description: Forbidden } }
+  /audit-events:
+    get:
+      operationId: listAuditEvents
+      summary: List recent immutable audit activity for the authenticated company
+      responses:
+        "200":
+          description: Recent audit activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuditEvent" }
+        "403": { description: Forbidden }
+  /works/{id}/review:
+    post:
+      operationId: incrementWorkReviewed
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "204": { description: Counted }, "403": { description: Forbidden } }
+components:
+  schemas:
+    CompanyOnboardingInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    AnalyticsEvent:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          enum:
+            - work_created
+            - work_reviewed
+            - expense_registered
+            - cost_alert_addressed
+            - incident_created
+            - incident_status_changed
+            - incident_resolved
+            - evidence_upload_selected
+            - payment_approved
+            - module_toggled
+        module:
+          type: string
+          enum: [profitability, communications, subcontractors]
+        properties:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: string
+                maxLength: 40
+              - type: number
+              - type: boolean
+      required: [name, module, properties]
+    AnalyticsSummary:
+      type: object
+      properties:
+        totalEvents:
+          type: integer
+        weeklyVisitors:
+          type: integer
+        returningVisitors:
+          type: integer
+        worksCreated:
+          type: integer
+        worksReviewed:
+          type: integer
+        expensesRegistered:
+          type: integer
+        costAlertsActedOn:
+          type: integer
+        incidencesCreated:
+          type: integer
+        incidencesResolved:
+          type: integer
+        evidenceUploads:
+          type: integer
+        paymentApprovals:
+          type: integer
+        moduleChanges:
+          type: integer
+        byModule:
+          type: object
+          properties:
+            profitability:
+              $ref: "#/components/schemas/ModuleRetention"
+            communications:
+              $ref: "#/components/schemas/ModuleRetention"
+            subcontractors:
+              $ref: "#/components/schemas/ModuleRetention"
+          required: [profitability, communications, subcontractors]
+      required:
+        - totalEvents
+        - weeklyVisitors
+        - returningVisitors
+        - worksCreated
+        - worksReviewed
+        - expensesRegistered
+        - costAlertsActedOn
+        - incidencesCreated
+        - incidencesResolved
+        - evidenceUploads
+        - paymentApprovals
+        - moduleChanges
+        - byModule
+    ModuleRetention:
+      type: object
+      properties:
+        currentWeeklyVisitors:
+          type: integer
+        previousWeeklyVisitors:
+          type: integer
+        returningVisitors:
+          type: integer
+        retentionRate:
+          type: number
+      required:
+        - currentWeeklyVisitors
+        - previousWeeklyVisitors
+        - returningVisitors
+        - retentionRate
+    Bootstrap:
+      type: object
+      required: [user, company, role, members, invitations, works, budgetItems, expenses, incidents, subcontractors, contracts, attachments, commitments, addressedCostAlerts, settings, metrics]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        company: { $ref: "#/components/schemas/Company" }
+        role: { type: string, enum: [owner_manager, office, site_manager] }
+        members: { type: array, items: { $ref: "#/components/schemas/Member" } }
+        invitations: { type: array, items: { $ref: "#/components/schemas/Invitation" } }
+        works: { type: array, items: { $ref: "#/components/schemas/Work" } }
+        budgetItems: { type: array, items: { type: object, additionalProperties: true } }
+        expenses: { type: array, items: { $ref: "#/components/schemas/Expense" } }
+        incidents: { type: array, items: { $ref: "#/components/schemas/Incident" } }
+        subcontractors: { type: array, items: { type: object, additionalProperties: true } }
+        contracts: { type: array, items: { type: object, additionalProperties: true } }
+        attachments: { type: array, items: { $ref: "#/components/schemas/Attachment" } }
+        commitments: { type: array, items: { type: object, additionalProperties: true } }
+        addressedCostAlerts: { type: array, items: { type: string } }
+        settings: { type: object, additionalProperties: true }
+        metrics: { type: object, additionalProperties: true }
+    User:
+      type: object
+      required: [id]
+      properties: { id: { type: string } }
+    Company:
+      type: object
+      required: [id, name]
+      properties: { id: { type: string }, name: { type: string } }
+    Member:
+      type: object
+      required: [id, clerkUserId, role]
+      properties:
+        id: { type: string }
+        clerkUserId: { type: string }
+        role: { type: string, enum: [owner_manager, office, site_manager] }
+    Work:
+      type: object
+      required: [id, name, client, location, status, progress, budget, startDate, endDate, manager]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        client: { type: string }
+        location: { type: string }
+        status: { type: string, enum: [planificación, en curso, pausada, completada] }
+        progress: { type: integer }
+        budget: { type: integer }
+        startDate: { type: string }
+        endDate: { type: string }
+        manager: { type: string }
+    WorkInput:
+      type: object
+      required: [name, client, location, status, progress, budget, startDate, endDate, manager]
+      properties:
+        name: { type: string }
+        client: { type: string }
+        location: { type: string }
+        status: { type: string }
+        progress: { type: integer }
+        budget: { type: integer }
+        startDate: { type: string }
+        endDate: { type: string }
+        manager: { type: string }
+    Expense:
+      type: object
+      required: [id, workId, itemId, description, amount, type, date, vendor]
+      properties:
+        id: { type: string }
+        workId: { type: string }
+        itemId: { type: string }
+        description: { type: string }
+        amount: { type: integer, minimum: 1 }
+        type: { type: string }
+        date: { type: string }
+        vendor: { type: string }
+    ExpenseInput:
+      type: object
+      required: [workId, itemId, description, amount, type, date, vendor]
+      properties:
+        workId: { type: string }
+        itemId: { type: string }
+        description: { type: string }
+        amount: { type: integer, minimum: 1 }
+        type: { type: string }
+        date: { type: string }
+        vendor: { type: string }
+    Incident:
+      type: object
+      required: [id, workId, title, description, status, priority, assignee, createdAt]
+      properties:
+        id: { type: string }
+        workId: { type: string }
+        title: { type: string }
+        description: { type: string }
+        status: { type: string }
+        priority: { type: string }
+        assignee: { type: string }
+        createdAt: { type: string }
+    Attachment:
+      type: object
+      required: [id, fileName, contentType, size, uploadedBy, createdAt]
+      properties:
+        id: { type: string }
+        incidentId: { type: ["string", "null"] }
+        contractId: { type: ["string", "null"] }
+        fileName: { type: string }
+        contentType: { type: string }
+        size: { type: integer }
+        uploadedBy: { type: string }
+        createdAt: { type: string }
+    UploadUrlRequest:
+      type: object
+      additionalProperties: false
+      required: [name, size, contentType]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        size: { type: integer, minimum: 1, maximum: 10485760 }
+        contentType: { type: string, minLength: 1 }
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL: { type: string }
+        objectPath: { type: string }
+    AttachmentInput:
+      type: object
+      additionalProperties: false
+      required: [objectPath, fileName, contentType, size]
+      properties:
+        objectPath: { type: string }
+        fileName: { type: string, minLength: 1, maxLength: 255 }
+        contentType: { type: string }
+        size: { type: integer, minimum: 1, maximum: 10485760 }
+        incidentId: { type: string }
+        contractId: { type: string }
+    IncidentInput:
+      type: object
+      required: [workId, title, description, priority, assignee]
+      properties:
+        workId: { type: string }
+        title: { type: string }
+        description: { type: string }
+        priority: { type: string }
+        assignee: { type: string }
+    IncidentStatusInput:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [abierto, en proceso, resuelto] } }
+    ContractPaymentInput:
+      type: object
+      required: [amount]
+      properties: { amount: { type: integer, minimum: 1 } }
+    CompanyUpdate:
+      type: object
+      required: [name]
+      properties: { name: { type: string, minLength: 1 } }
+    MemberRoleInput:
+      type: object
+      required: [role]
+      properties: { role: { type: string, enum: [owner_manager, office, site_manager] } }
+    Invitation:
+      type: object
+      required: [id, email, role, status, expiresAt, createdAt]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [office, site_manager] }
+        status: { type: string, enum: [pending, accepted, revoked, expired] }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    InvitationInput:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        role: { type: string, enum: [office, site_manager] }
+    InvitationAcceptance:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string, minLength: 32, maxLength: 200 }
+    ModuleUpdate:
+      type: object
+      required: [module, enabled]
+      properties: { module: { type: string, enum: [profitability, communications, subcontractors] }, enabled: { type: boolean } }
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [id, actorUserId, action, details, createdAt]
+      properties:
+        id: { type: string }
+        actorUserId: { type: string }
+        action:
+          type: string
+          enum: [payment.approved, member.role_changed, module.changed, cost_alert.addressed]
+        targetId: { type: [string, "null"] }
+        details: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }

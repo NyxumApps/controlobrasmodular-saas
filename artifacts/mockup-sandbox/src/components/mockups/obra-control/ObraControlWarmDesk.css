@@ -1,0 +1,43 @@
+.warm-desk {
+  --paper: #f6f0e6;
+  --paper-deep: #ede3d5;
+  --ink: #2f2925;
+  --muted: #82766c;
+  --line: #ded2c4;
+  --wine: #7f302f;
+  --olive: #68714a;
+  --ochre: #b87938;
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+.warm-desk h1,
+.warm-desk h2,
+.warm-desk h3,
+.warm-desk .brand-mark {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.warm-desk button,
+.warm-desk a {
+  transition: transform 180ms ease, opacity 180ms ease, background-color 180ms ease;
+}
+
+.warm-desk button:hover,
+.warm-desk a:hover {
+  transform: translateY(-1px);
+}
+
+.warm-desk .grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .08;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.32'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+}
+
+.warm-desk .scroll-area::-webkit-scrollbar { width: 7px; }
+.warm-desk .scroll-area::-webkit-scrollbar-thumb { background: #cfbfaf; border-radius: 8px; }
