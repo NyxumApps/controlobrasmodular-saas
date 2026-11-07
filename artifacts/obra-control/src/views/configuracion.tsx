@@ -52,6 +52,7 @@ export default function Configuracion() {
   const [inviteEmail, setInviteEmail] = useState("")
   const [newMemberRole, setNewMemberRole] = useState<'office' | 'site_manager'>('site_manager')
   const [invitationAction, setInvitationAction] = useState<string | null>(null)
+  const [invitationUrl, setInvitationUrl] = useState<string | null>(null)
 
   const manageInvitation = async (id: string, action: 'revoke' | 'resend') => {
     setInvitationAction(`${action}:${id}`)
@@ -60,12 +61,13 @@ export default function Configuracion() {
         await actions.revokeInvitation(id)
         toast({ title: "Invitación cancelada", description: "El enlace anterior ya no se puede utilizar." })
       } else {
-        await actions.resendInvitation(id)
-        toast({ title: "Invitación reenviada", description: "Se envió un enlace nuevo con vigencia de siete días." })
+        const invitation = await actions.resendInvitation(id)
+        setInvitationUrl(invitation.invitationUrl)
+        toast({ title: "Enlace nuevo creado", description: "Cópialo y compártelo con la persona invitada." })
       }
     } catch (error) {
       toast({
-        title: action === 'revoke' ? "No se pudo cancelar" : "No se pudo reenviar",
+        title: action === 'revoke' ? "No se pudo cancelar" : "No se pudo crear el enlace",
         description: error instanceof Error ? error.message : "Intenta nuevamente.",
       })
     } finally {
@@ -97,7 +99,7 @@ export default function Configuracion() {
       <Card>
         <CardHeader>
           <CardTitle>Equipo y permisos</CardTitle>
-          <CardDescription>Asigna el nivel de acceso de cada miembro de la empresa.</CardDescription>
+          <CardDescription>Asigna el nivel de acceso y comparte los enlaces de invitación directamente con tu equipo.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {role === 'owner_manager' && (
@@ -107,7 +109,34 @@ export default function Configuracion() {
                 <option value="office">Oficina</option>
                 <option value="site_manager">Jefe de obra</option>
               </select>
-              <Button disabled={!inviteEmail.trim()} onClick={async () => { await actions.inviteMember(inviteEmail, newMemberRole); setInviteEmail("") }}>Invitar</Button>
+              <Button disabled={!inviteEmail.trim()} onClick={async () => {
+                try {
+                  const invitation = await actions.inviteMember(inviteEmail, newMemberRole)
+                  setInvitationUrl(invitation.invitationUrl)
+                  setInviteEmail("")
+                } catch {
+                  // The shared store has already shown the actionable error.
+                }
+              }}>Crear enlace</Button>
+            </div>
+          )}
+          {role === 'owner_manager' && invitationUrl && (
+            <div className="space-y-3 rounded-md border border-teal-200 bg-teal-50 p-3" role="status">
+              <div>
+                <p className="text-sm font-medium text-teal-950">Enlace de invitación listo</p>
+                <p className="mt-1 text-xs text-teal-900">Vence en siete días. Compártelo solo con la persona invitada y pídele que use este mismo correo.</p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input aria-label="Enlace de invitación" readOnly value={invitationUrl} />
+                <Button type="button" variant="outline" onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(invitationUrl)
+                    toast({ title: "Enlace copiado" })
+                  } catch {
+                    toast({ title: "No se pudo copiar", description: "Selecciona el enlace y cópialo manualmente." })
+                  }
+                }}>Copiar enlace</Button>
+              </div>
             </div>
           )}
           {role === 'owner_manager' && state.invitations.length > 0 && (

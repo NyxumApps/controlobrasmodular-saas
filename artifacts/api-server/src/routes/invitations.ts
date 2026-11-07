@@ -13,44 +13,22 @@ import { ensurePilotData } from "../lib/pilot-seed";
 import { getSessionUserId, requireAuth } from "../middlewares/auth";
 import { can } from "../lib/authorization-policy";
 import { getRequestHostWithPort } from "../middlewares/allowedHost";
-import { supabaseAdmin } from "../lib/supabase";
 
 type InvitationRouterDependencies = {
   getUserId: (req: Request) => string | null;
-  getVerifiedEmails: (userId: string) => Promise<string[]>;
+  getInvitationEmails: (userId: string, req?: Request) => Promise<string[]>;
   seedCompany: (companyId: string) => Promise<void>;
   authenticate: RequestHandler;
   sendInvitationEmail: (input: { emailAddress: string; redirectUrl: string }) => Promise<void>;
 };
 
-/**
- * New people receive Supabase's invitation email; people who already have an
- * account receive a sign-in link. Both land on /invite/{token}, and that token
- * (stored only as a hash) is what actually grants the membership.
- */
-async function sendSupabaseInvitation(input: { emailAddress: string; redirectUrl: string }): Promise<void> {
-  const auth = supabaseAdmin().auth;
-  const invited = await auth.admin.inviteUserByEmail(input.emailAddress, { redirectTo: input.redirectUrl });
-  if (!invited.error) return;
-  if (invited.error.code !== "email_exists" && invited.error.status !== 422) throw invited.error;
-  const link = await auth.signInWithOtp({
-    email: input.emailAddress,
-    options: { shouldCreateUser: false, emailRedirectTo: input.redirectUrl },
-  });
-  if (link.error) throw link.error;
-}
-
 const defaultDependencies: InvitationRouterDependencies = {
   getUserId: getSessionUserId,
-  getVerifiedEmails: async userId => {
-    const { data, error } = await supabaseAdmin().auth.admin.getUserById(userId);
-    if (error) throw error;
-    const user = data.user;
-    return user?.email && user.email_confirmed_at ? [user.email] : [];
-  },
+  getInvitationEmails: async (userId, req) =>
+    req?.sessionUserId === userId && req.sessionUserEmail ? [req.sessionUserEmail] : [],
   seedCompany: ensurePilotData,
   authenticate: requireAuth,
-  sendInvitationEmail: sendSupabaseInvitation,
+  sendInvitationEmail: async () => undefined,
 };
 
 export function createInvitationsRouter(
@@ -75,13 +53,14 @@ const invitationAuditEvent = (
   details: { email, ...details },
 });
 
-const serializeInvitation = (invitation: typeof companyInvitationsTable.$inferSelect) => ({
+const serializeInvitation = (invitation: typeof companyInvitationsTable.$inferSelect, invitationUrl?: string) => ({
   id: invitation.id,
   email: invitation.email,
   role: invitation.role,
   status: invitation.status,
   expiresAt: invitation.expiresAt.toISOString(),
   createdAt: invitation.createdAt.toISOString(),
+  ...(invitationUrl ? { invitationUrl } : {}),
 });
 
 router.post("/invitations", dependencies.authenticate, async (req, res): Promise<void> => {
@@ -123,7 +102,7 @@ router.post("/invitations", dependencies.authenticate, async (req, res): Promise
   if ("error" in reservation) { res.status(409).json({ error: "Ya existe una invitación vigente para este correo" }); return; }
   try {
     await dependencies.sendInvitationEmail({ emailAddress: email, redirectUrl });
-    res.status(201).json(serializeInvitation(reservation.row));
+    res.status(201).json(serializeInvitation(reservation.row, redirectUrl));
   } catch (error) {
     await db.delete(companyInvitationsTable).where(and(
       eq(companyInvitationsTable.id, invitationId),
@@ -228,10 +207,11 @@ router.post("/invitations/:id/resend", dependencies.authenticate, async (req, re
     });
     return;
   }
+  const redirectUrl = `${invitationOrigin(host)}/invite/${token}`;
   try {
     await dependencies.sendInvitationEmail({
       emailAddress: reservation.row.email,
-      redirectUrl: `${invitationOrigin(host)}/invite/${token}`,
+      redirectUrl,
     });
     const [row] = await db.transaction(async tx => {
       const [current] = await tx.select().from(companyInvitationsTable).where(and(
@@ -250,7 +230,7 @@ router.post("/invitations/:id/resend", dependencies.authenticate, async (req, re
       return [current];
     });
     if (!row) throw new Error("Invitation reservation disappeared before it could be confirmed");
-    res.status(201).json(serializeInvitation(row));
+    res.status(201).json(serializeInvitation(row, redirectUrl));
   } catch (error) {
     await db.delete(companyInvitationsTable).where(and(
       eq(companyInvitationsTable.id, newInvitationId),
@@ -267,7 +247,7 @@ router.post("/invitations/accept", async (req, res): Promise<void> => {
   const parsed = AcceptInvitationBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "La invitación no es válida" }); return; }
 
-  const verifiedEmails = await dependencies.getVerifiedEmails(userId);
+  const accountEmails = await dependencies.getInvitationEmails(userId, req);
   const tokenHash = hashInvitationToken(parsed.data.token);
   const result = await db.transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tokenHash}))`);
@@ -278,7 +258,7 @@ router.post("/invitations/accept", async (req, res): Promise<void> => {
         gt(companyInvitationsTable.expiresAt, new Date()),
       )).limit(1);
     if (!invitation) return { error: "invalid" as const };
-    if (!emailMatchesInvitation(invitation.email, verifiedEmails)) return { error: "wrong_account" as const };
+    if (!emailMatchesInvitation(invitation.email, accountEmails)) return { error: "wrong_account" as const };
     const [existing] = await tx.select().from(membershipsTable)
       .where(eq(membershipsTable.clerkUserId, userId)).limit(1);
     if (existing) return { error: "already_member" as const };

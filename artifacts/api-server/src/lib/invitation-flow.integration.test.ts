@@ -54,7 +54,7 @@ test("invitation acceptance covers signed-in, wrong-account, expiry, and replay 
   app.use(express.json());
   app.use("/api", createInvitationsRouter({
     getUserId: req => req.header("x-test-user-id") ?? null,
-    getVerifiedEmails: async userId => userEmails.get(userId) ?? [],
+    getInvitationEmails: async userId => userEmails.get(userId) ?? [],
     seedCompany: async () => {},
     authenticate: (_req, _res, next) => next(),
     sendInvitationEmail: async () => {},
@@ -179,7 +179,7 @@ test("invitation cancellation and resend enforce roles, isolation, terminal toke
   });
   app.use("/api", createInvitationsRouter({
     getUserId: req => req.header("x-test-user-id") ?? null,
-    getVerifiedEmails: async () => [
+    getInvitationEmails: async () => [
       `revoke-${suffix}@example.com`,
       `expired-${suffix}@example.com`,
     ],

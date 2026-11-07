@@ -126,9 +126,9 @@ type StoreContextType = {
     deleteAttachment: (id: string) => Promise<void>;
     updateCompanyName: (name: string) => Promise<void>;
     updateMemberRole: (id: string, role: 'owner_manager' | 'office' | 'site_manager') => Promise<void>;
-    inviteMember: (email: string, role: 'office' | 'site_manager') => Promise<void>;
+    inviteMember: (email: string, role: 'office' | 'site_manager') => Promise<{ invitationUrl: string }>;
     revokeInvitation: (id: string) => Promise<void>;
-    resendInvitation: (id: string) => Promise<void>;
+    resendInvitation: (id: string) => Promise<{ invitationUrl: string }>;
     toggleModule: (module: keyof ModuleSettings, enabled: boolean) => Promise<void>;
     markCostAlert: (id: string) => Promise<void>;
     reviewWork: (id: string) => Promise<void>;
@@ -191,9 +191,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteAttachment: id => request(`/attachments/${id}`, 'DELETE'),
     updateCompanyName: name => request('/company', 'PATCH', { name }, 'Cambios guardados'),
     updateMemberRole: (id, role) => request(`/members/${id}/role`, 'PATCH', { role }, 'Rol actualizado'),
-    inviteMember: (email, role) => request('/invitations', 'POST', { email, role }, 'Invitación enviada'),
+    inviteMember: (email, role) => request<{ invitationUrl: string }>('/invitations', 'POST', { email, role }, 'Enlace de invitación creado'),
     revokeInvitation: id => request(`/invitations/${id}`, 'DELETE'),
-    resendInvitation: id => request(`/invitations/${id}/resend`, 'POST'),
+    resendInvitation: id => request<{ invitationUrl: string }>(`/invitations/${id}/resend`, 'POST'),
     toggleModule: (module, enabled) => request('/settings/modules', 'PATCH', { module, enabled }, enabled ? 'Módulo activado' : 'Módulo desactivado'),
     markCostAlert: id => request(`/cost-alerts/${encodeURIComponent(id)}/address`, 'POST', undefined, 'Alerta marcada como atendida'),
     // Background bookkeeping: a failure here must not interrupt reading the work.
@@ -223,7 +223,7 @@ function AccessPending({ error, onCreated }: { error: string; onCreated: () => P
       setSaving(false);
     }
   };
-  return <div className="min-h-screen grid place-items-center p-6"><div className="max-w-lg rounded-xl border bg-card p-6 text-center"><h1 className="text-xl font-semibold">Configura tu acceso</h1><p className="mt-2 text-muted-foreground">{error}</p><p className="mt-5 text-sm text-muted-foreground">Si te invitaron, abre el enlace enviado a tu correo. Si eres el primer dueño, crea una empresa nueva.</p><div className="mt-5 flex gap-2"><input className="h-10 flex-1 rounded-md border bg-background px-3 text-sm" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Nombre de la empresa" aria-label="Nombre de la empresa" /><button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50" disabled={!companyName.trim() || saving} onClick={() => void createCompany()}>{saving ? 'Creando…' : 'Crear empresa'}</button></div>{creationError && <p className="mt-3 text-sm text-destructive">{creationError}</p>}</div></div>;
+  return <div className="min-h-screen grid place-items-center p-6"><div className="max-w-lg rounded-xl border bg-card p-6 text-center"><h1 className="text-xl font-semibold">Configura tu acceso</h1><p className="mt-2 text-muted-foreground">{error}</p><p className="mt-5 text-sm text-muted-foreground">Si te invitaron, abre el enlace que te compartió el dueño de la empresa. Si eres el primer dueño, crea una empresa nueva.</p><div className="mt-5 flex gap-2"><input className="h-10 flex-1 rounded-md border bg-background px-3 text-sm" value={companyName} onChange={event => setCompanyName(event.target.value)} placeholder="Nombre de la empresa" aria-label="Nombre de la empresa" /><button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50" disabled={!companyName.trim() || saving} onClick={() => void createCompany()}>{saving ? 'Creando…' : 'Crear empresa'}</button></div>{creationError && <p className="mt-3 text-sm text-destructive">{creationError}</p>}</div></div>;
 }
 
 function LoadFailed({ title, message, onRetry, retrying }: { title: string; message: string; onRetry: () => void; retrying: boolean }) {

@@ -32,9 +32,9 @@ export class ErrorBoundary extends React.Component<
             <p className="text-sm text-muted-foreground">Tu información está segura. Puedes intentar de nuevo o volver al inicio.</p>
             <div className="mt-5 flex justify-center gap-2">
               <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" onClick={() => this.setState({ hasError: false, error: null })}>Intentar de nuevo</button>
-              <button className="rounded-md border px-4 py-2 text-sm font-medium" onClick={() => window.location.assign(import.meta.env.BASE_URL)}>Ir al inicio</button>
+              <button className="rounded-md border px-4 py-2 text-sm font-medium" onClick={() => window.location.assign("/")}>Ir al inicio</button>
             </div>
-            {import.meta.env.DEV && <p className="mt-4 text-xs font-mono text-destructive">{this.state.error?.message}</p>}
+            {process.env.NODE_ENV !== "production" && <p className="mt-4 text-xs font-mono text-destructive">{this.state.error?.message}</p>}
           </div>
         </div>
       );

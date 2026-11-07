@@ -149,6 +149,7 @@ export interface Invitation {
   status: InvitationStatus;
   expiresAt: string;
   createdAt: string;
+  invitationUrl?: string;
 }
 
 export type WorkStatus = typeof WorkStatus[keyof typeof WorkStatus];

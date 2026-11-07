@@ -18,4 +18,5 @@
 //   export type Post = typeof postsTable.$inferSelect;
 
 export * from "./analytics-events";
+export * from "./auth";
 export * from "./obra-control";

@@ -367,7 +367,8 @@ export const CreateInvitationResponse = zod.object({
   "role": zod.enum(['office', 'site_manager']),
   "status": zod.enum(['pending', 'accepted', 'revoked', 'expired']),
   "expiresAt": zod.coerce.date(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "invitationUrl": zod.string().url().optional()
 })
 
 
@@ -395,7 +396,8 @@ export const ResendInvitationResponse = zod.object({
   "role": zod.enum(['office', 'site_manager']),
   "status": zod.enum(['pending', 'accepted', 'revoked', 'expired']),
   "expiresAt": zod.coerce.date(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "invitationUrl": zod.string().url().optional()
 })
 
 

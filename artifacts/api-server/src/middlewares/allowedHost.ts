@@ -18,6 +18,16 @@ export function getAllowedHosts(env: NodeJS.ProcessEnv = process.env): Set<strin
   if (env.NODE_ENV !== "production") {
     hosts.add("localhost");
     hosts.add("127.0.0.1");
+    for (const origin of [env.V0_RUNTIME_URL, env.V0_DEV_APP_URL, env.V0_BUILD_URL, env.V0_SANDBOX_URL]) {
+      const host = normalizeHost(origin);
+      if (host) hosts.add(host);
+    }
+  }
+  if (env.NODE_ENV === "production") {
+    for (const hostname of [env.VERCEL_URL, env.VERCEL_PROJECT_PRODUCTION_URL]) {
+      const host = normalizeHost(hostname);
+      if (host) hosts.add(host);
+    }
   }
   return hosts;
 }

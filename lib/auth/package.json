@@ -1,0 +1,17 @@
+{
+  "name": "@workspace/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "@workspace/db": "workspace:*",
+    "better-auth": "^1.7.18"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}

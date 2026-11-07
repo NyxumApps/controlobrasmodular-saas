@@ -1,5 +1,3 @@
-import { getAccessToken } from '@/lib/supabase';
-
 export type ApiErrorKind = 'offline' | 'timeout' | 'session' | 'permission' | 'validation' | 'conflict' | 'not_found' | 'rate_limit' | 'server';
 
 export class ApiError extends Error {
@@ -78,14 +76,12 @@ export function toApiError(cause: unknown): ApiError {
   return buildError(0, 'server');
 }
 
-/** fetch for our own API: adds the session token, a timeout and readable errors. */
+/** fetch for our same-origin API: browser cookies carry the Better Auth session. */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
-  const token = await getAccessToken().catch(() => null);
-  if (token && !headers.has('authorization')) headers.set('Authorization', `Bearer ${token}`);
   let response: Response;
   try {
-    response = await fetch(path, { ...init, headers, signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    response = await fetch(path, { ...init, headers, credentials: 'same-origin', signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch (cause) {
     throw toApiError(cause);
   }

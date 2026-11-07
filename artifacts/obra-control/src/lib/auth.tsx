@@ -1,61 +1,52 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
+import { signOut as signOutWithBetterAuth, useSession } from "@workspace/auth/client";
+
+type AuthUser = {
+  id: string;
+  email: string;
+  name: string;
+};
 
 type AuthContextType = {
-  user: User | null;
-  session: Session | null;
+  user: AuthUser | null;
   loading: boolean;
-  /** True after following a password recovery link, until a new password is saved. */
-  recovering: boolean;
-  finishRecovery: () => void;
   signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children, onUserChange }: { children: ReactNode; onUserChange?: () => void }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [recovering, setRecovering] = useState(false);
+  const { data, isPending } = useSession();
+  const previousUserId = useRef<string | null | undefined>(undefined);
+  const user = data?.user
+    ? { id: data.user.id, email: data.user.email, name: data.user.name }
+    : null;
 
   useEffect(() => {
-    let previousUserId: string | null | undefined;
-    const apply = (next: Session | null) => {
-      const id = next?.user.id ?? null;
-      if (previousUserId !== undefined && previousUserId !== id) onUserChange?.();
-      previousUserId = id;
-      setSession(next);
-      setLoading(false);
-    };
-    void supabase.auth.getSession().then(({ data }) => apply(data.session)).catch(() => apply(null));
-    const { data } = supabase.auth.onAuthStateChange((event, next) => {
-      if (event === 'PASSWORD_RECOVERY') setRecovering(true);
-      apply(next);
-    });
-    return () => data.subscription.unsubscribe();
-  }, [onUserChange]);
+    const nextUserId = user?.id ?? null;
+    if (previousUserId.current !== undefined && previousUserId.current !== nextUserId) onUserChange?.();
+    previousUserId.current = nextUserId;
+  }, [user?.id, onUserChange]);
 
   const value: AuthContextType = {
-    user: session?.user ?? null,
-    session,
-    loading,
-    recovering,
-    finishRecovery: () => setRecovering(false),
-    signOut: async () => { await supabase.auth.signOut(); },
+    user,
+    loading: isPending,
+    signOut: async () => {
+      await signOutWithBetterAuth();
+    },
   };
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
   return context;
 }
 
-/** Renders children only for the matching session state, and nothing while it is still unknown. */
-export function Show({ when, children }: { when: 'signed-in' | 'signed-out'; children: ReactNode }) {
+export function Show({ when, children }: { when: "signed-in" | "signed-out"; children: ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null;
-  return (when === 'signed-in') === Boolean(user) ? <>{children}</> : null;
+  return (when === "signed-in") === Boolean(user) ? <>{children}</> : null;
 }
